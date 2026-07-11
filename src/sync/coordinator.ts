@@ -1,0 +1,35 @@
+import { EntityComponentTypes, EquipmentSlot, Player, system, world } from "@minecraft/server";
+import { CloneCraftConfig } from "../config";
+import { cloneState } from "../model/sharedState";
+import { SharedState } from "../model/types";
+import { Persistence } from "../pool/persistence";
+import { PlayerPool } from "../pool/playerPool";
+import { acquire, locked } from "../utilities/applyLock";
+import { log } from "../utilities/logging";
+
+export class Coordinator {
+  private tick = 0;
+  private state: SharedState;
+  private readonly persistence = new Persistence();
+  constructor(private readonly config: CloneCraftConfig, private readonly pool: PlayerPool) {
+    this.state = this.persistence.load() ?? { schemaVersion: 1, initialized: false, epoch: 0, dirty: false, enabled: config.enabled, health: 20, hunger: 20, saturation: 5, inventory: Array(36).fill(undefined), equipment: { head: undefined, chest: undefined, legs: undefined, feet: undefined, offhand: undefined }, totalXp: 0, selectedSlot: 0, death: { phase: "alive", generation: 0, expectedPlayerIds: [], respawnedPlayerIds: [] }, lastCommitTick: 0 };
+  }
+  get snapshot(): SharedState { return cloneState(this.state); }
+  start(): void { system.runInterval(() => this.reconcile(), this.config.reconciliationIntervalTicks); system.runInterval(() => { if (this.state.dirty && this.config.saveStateBetweenSessions) { this.persistence.save(this.state); this.state.dirty = false; } }, this.config.persistenceIntervalTicks); }
+  admit(player: Player): void { const runtime = this.pool.join(player, this.tick); if (!runtime) return; system.runTimeout(() => this.applyOrInitialize(player), this.config.joinApplyDelayTicks); }
+  markRespawn(player: Player): void { const runtime = this.pool.runtime(player); if (runtime && runtime.phase !== "excluded") { if (this.state.death.phase !== "alive") this.state.death.respawnedPlayerIds.push(player.id); this.admit(player); } }
+  remove(id: string): void { this.pool.leave(id); if (this.pool.players.size === 0 && this.state.dirty) { this.persistence.save(this.state); this.state.dirty = false; } }
+  resync(): void { for (const player of this.pool.activePlayers()) this.apply(player); }
+  setEnabled(value: boolean): void { this.state.enabled = value; this.state.dirty = true; }
+  initializeFrom(player: Player): void { const health = this.componentValue(player, EntityComponentTypes.Health) ?? 20; this.state.health = health; this.state.hunger = this.attribute(player, "minecraft:player.hunger") ?? 20; this.state.saturation = this.attribute(player, "minecraft:player.saturation") ?? 5; this.state.selectedSlot = player.selectedSlotIndex; this.state.totalXp = player.getTotalXp(); this.captureInventory(player); this.state.initialized = true; this.commit(); }
+  private applyOrInitialize(player: Player): void { if (!this.state.initialized) this.initializeFrom(player); else this.apply(player); }
+  private reconcile(): void { this.tick++; if (!this.state.enabled) return; for (const player of this.pool.activePlayers()) { const runtime = this.pool.runtime(player); if (!runtime) continue; runtime.lastSeenTick = this.tick; if (!this.state.initialized) { this.initializeFrom(player); continue; } if (!locked(runtime, this.tick) && runtime.phase === "applying") runtime.phase = "active"; if (!locked(runtime, this.tick) && runtime.phase === "active") this.observe(player); } }
+  private observe(player: Player): void { const r = this.pool.runtime(player)!; const health = this.componentValue(player, EntityComponentTypes.Health); if (health !== undefined && r.lastHealth !== undefined && health !== r.lastHealth) { this.state.health = Math.max(0, this.state.health + health - r.lastHealth); this.commit(); } r.lastHealth = health; const hunger = this.attribute(player, "minecraft:player.hunger"); if (hunger !== undefined && r.lastHunger !== undefined && hunger !== r.lastHunger) { this.state.hunger = Math.max(0, Math.min(20, this.state.hunger + hunger - r.lastHunger)); this.commit(); } r.lastHunger = hunger; const saturation = this.attribute(player, "minecraft:player.saturation"); if (saturation !== undefined && r.lastSaturation !== undefined) { this.state.saturation = Math.max(0, this.state.saturation + saturation - r.lastSaturation); this.commit(); } r.lastSaturation = saturation; const xp = player.getTotalXp(); if (r.lastXp !== undefined && xp !== r.lastXp) { this.state.totalXp = Math.max(0, this.state.totalXp + xp - r.lastXp); this.commit(); } r.lastXp = xp; if (player.selectedSlotIndex !== r.lastSelectedSlot) { this.state.selectedSlot = player.selectedSlotIndex; this.commit(); } r.lastSelectedSlot = player.selectedSlotIndex; }
+  private apply(player: Player): void { const r = this.pool.runtime(player); if (!r) return; acquire(r, this.tick, this.config.applyLockTicks, this.state.epoch); try { const health = player.getComponent(EntityComponentTypes.Health) as any; if (this.config.shareHealth && health) health.setCurrentValue(Math.min(health.effectiveMax, Math.max(health.effectiveMin, this.state.health))); if (this.config.shareHunger) this.setAttribute(player, "minecraft:player.hunger", this.state.hunger); if (this.config.shareHunger) this.setAttribute(player, "minecraft:player.saturation", this.state.saturation); if (this.config.shareSelectedSlot) player.selectedSlotIndex = this.state.selectedSlot; if (this.config.shareExperience) { player.resetLevel(); if (this.state.totalXp > 0) player.addExperience(this.state.totalXp); } if (this.config.shareInventory) this.writeInventory(player); r.lastHealth = this.componentValue(player, EntityComponentTypes.Health); r.lastHunger = this.attribute(player, "minecraft:player.hunger"); r.lastSaturation = this.attribute(player, "minecraft:player.saturation"); r.lastXp = player.getTotalXp(); r.lastSelectedSlot = player.selectedSlotIndex; } catch (error) { log("error", "coordinator", `Replica apply failed for ${player.name}: ${String(error)}`, this.tick, this.state.epoch); } }
+  private captureInventory(player: Player): void { const inventory = player.getComponent(EntityComponentTypes.Inventory) as any; if (!inventory?.container) return; this.state.inventory = Array.from({ length: 36 }, (_, i) => inventory.container.getItem(i)?.clone()); }
+  private writeInventory(player: Player): void { const inventory = player.getComponent(EntityComponentTypes.Inventory) as any; if (!inventory?.container) return; for (let i = 0; i < 36; i++) inventory.container.setItem(i, this.state.inventory[i]?.clone()); }
+  private componentValue(player: Player, component: any): number | undefined { try { return (player.getComponent(component) as any)?.currentValue; } catch { return undefined; } }
+  private attribute(player: Player, id: string): number | undefined { return this.componentValue(player, id); }
+  private setAttribute(player: Player, id: string, value: number): void { try { (player.getComponent(id) as any)?.setCurrentValue(value); } catch { /* unsupported on this API build */ } }
+  private commit(): void { this.state.epoch++; this.state.lastCommitTick = this.tick; this.state.dirty = true; this.resync(); }
+}

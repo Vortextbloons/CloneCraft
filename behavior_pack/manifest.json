@@ -1,0 +1,50 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "CloneCraft",
+    "description": "",
+    "uuid": "e8d3e9ee-8b4e-46a3-942f-d01de1b44777",
+    "version": [
+      1,
+      0,
+      0
+    ],
+    "min_engine_version": [
+      1,
+      21,
+      60
+    ]
+  },
+  "modules": [
+    {
+      "type": "data",
+      "uuid": "3afe0065-42ee-48be-a60c-39ef2d970414",
+      "version": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "script",
+      "uuid": "d4801f18-9b55-4fe6-b88c-6adef0ce8436",
+      "version": [
+        1,
+        0,
+        0
+      ],
+      "language": "javascript",
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "2.10.0-beta.1.26.33-stable"
+    },
+    {
+      "module_name": "@minecraft/server-ui",
+      "version": "2.2.0-beta.1.26.33-stable"
+    }
+  ]
+}
