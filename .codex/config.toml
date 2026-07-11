@@ -1,5 +1,0 @@
-[mcp_servers.Bedrock-JSON-UI]
-command = "C:\\Users\\isaac\\.local\\bin\\mcp-bedrock-json-ui.cmd"
-
-[mcp_servers.Script-API-Helper]
-command = "C:\\Users\\isaac\\.local\\bin\\script-api-helper.exe"
