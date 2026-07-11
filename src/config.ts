@@ -5,6 +5,7 @@ export interface CloneCraftConfig {
   shareInventory: boolean;
   shareEquipment: boolean;
   shareExperience: boolean;
+  shareEffects: boolean;
   shareSelectedSlot: boolean;
   shareDeath: boolean;
   allowLateJoining: boolean;
@@ -23,7 +24,7 @@ export interface CloneCraftConfig {
 
 export const DEFAULT_CONFIG: Readonly<CloneCraftConfig> = Object.freeze({
   enabled: true, shareHealth: true, shareHunger: true, shareInventory: true,
-  shareEquipment: true, shareExperience: true, shareSelectedSlot: true, shareDeath: true,
+  shareEquipment: true, shareExperience: true, shareEffects: true, shareSelectedSlot: false, shareDeath: true,
   allowLateJoining: true, saveStateBetweenSessions: true, reconciliationIntervalTicks: 1,
   persistenceIntervalTicks: 100, joinApplyDelayTicks: 1, respawnGraceTicks: 10,
   applyLockTicks: 2, conflictMode: "deterministic", excludeCreative: true,

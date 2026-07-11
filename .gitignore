@@ -1,0 +1,7 @@
+node_modules/
+behavior_pack/scripts/main.js
+*.mcaddon
+*.zip
+.env
+.codex/
+.agents/
